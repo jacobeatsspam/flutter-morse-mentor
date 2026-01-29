@@ -50,12 +50,7 @@ class _ReferenceScreenState extends State<ReferenceScreen>
       await _audioPlayer.stop();
       
       final adjustedWpm = (settings.wordsPerMinute * speed).round().clamp(5, 50);
-      
-      // For Farnsworth, character speed should be FASTER than gap speed
-      // If farnsworthWpm is lower than adjustedWpm, use adjustedWpm for characters instead
-      final effectiveCharWpm = useFarnsworth 
-          ? (settings.farnsworthWpm > adjustedWpm ? settings.farnsworthWpm : null)
-          : null;
+      final effectiveCharWpm = useFarnsworth ? settings.farnsworthWpm : null;
       
       final generator = MorseAudioGenerator(
         toneFrequency: settings.toneFrequency,

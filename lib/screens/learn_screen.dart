@@ -11,7 +11,6 @@ import '../core/theme/app_theme.dart';
 import '../core/constants/morse_code.dart';
 import '../models/user_progress.dart';
 import '../services/progress_service.dart';
-import '../services/settings_service.dart';
 import '../widgets/telegraph_key_layout.dart';
 import '../widgets/morse_display.dart';
 
@@ -410,7 +409,6 @@ class _LearnScreenState extends State<LearnScreen> {
   }
 
   Widget _buildCharacterDisplay(MorseCharacter char) {
-    final settings = context.watch<SettingsService>();
     final progress = context.watch<ProgressService>();
     final charProgress = progress.getCharacterProgress(char.character);
     
@@ -488,22 +486,20 @@ class _LearnScreenState extends State<LearnScreen> {
 
         const SizedBox(height: 16),
 
-        // Morse pattern (hint)
-        if (settings.showHints) ...[
-          MorseDisplay(
-            pattern: char.morse,
-            elementSize: 20,
-            animated: true,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            MorseCode.formatForDisplay(char.morse),
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: AppColors.textSecondary,
-                  letterSpacing: 4,
-                ),
-          ),
-        ],
+        // Morse pattern (visual hint)
+        MorseDisplay(
+          pattern: char.morse,
+          elementSize: 20,
+          animated: true,
+        ),
+        const SizedBox(height: 12),
+        Text(
+          MorseCode.formatForDisplay(char.morse),
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: AppColors.textSecondary,
+                letterSpacing: 4,
+              ),
+        ),
 
         const SizedBox(height: 16),
 

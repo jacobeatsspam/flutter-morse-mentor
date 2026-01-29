@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/theme/app_theme.dart';
-import '../services/settings_service.dart';
 import '../services/progress_service.dart';
+import '../services/settings_service.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -11,7 +11,7 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>();
-    final progress = context.watch<ProgressService>();
+    final progress = context.read<ProgressService>();
 
     return Scaffold(
       appBar: AppBar(
@@ -32,26 +32,16 @@ class SettingsScreen extends StatelessWidget {
             divisions: 35,
             onChanged: (value) => settings.setWordsPerMinute(value.round()),
           ),
-
-          // Farnsworth timing
-          _buildSwitchTile(
+          _buildSliderTile(
             context: context,
-            title: 'Farnsworth Timing',
-            subtitle: 'Characters at higher speed with extra gaps',
-            value: settings.farnsworthEnabled,
-            onChanged: settings.setFarnsworthEnabled,
+            title: 'Farnsworth Speed',
+            subtitle: '${settings.farnsworthWpm} WPM',
+            value: settings.farnsworthWpm.toDouble(),
+            min: 15,
+            max: 40,
+            divisions: 25,
+            onChanged: (value) => settings.setfarnsworthWpm(value.round()),
           ),
-          if (settings.farnsworthEnabled)
-            _buildSliderTile(
-              context: context,
-              title: 'Character Speed',
-              subtitle: '${settings.farnsworthWpm} WPM',
-              value: settings.farnsworthWpm.toDouble(),
-              min: settings.wordsPerMinute.toDouble(),
-              max: 40,
-              divisions: 35 - settings.wordsPerMinute,
-              onChanged: (value) => settings.setFarnsworthWpm(value.round()),
-            ),
 
           const SizedBox(height: 24),
 
@@ -80,8 +70,8 @@ class SettingsScreen extends StatelessWidget {
 
           const SizedBox(height: 24),
 
-          // Learning settings
-          _buildSectionHeader(context, 'LEARNING'),
+          // Input settings
+          _buildSectionHeader(context, 'INPUT'),
           _buildSwitchTile(
             context: context,
             title: 'Haptic Feedback',
@@ -89,31 +79,6 @@ class SettingsScreen extends StatelessWidget {
             value: settings.hapticFeedback,
             onChanged: settings.setHapticFeedback,
           ),
-          _buildSwitchTile(
-            context: context,
-            title: 'Show Hints',
-            subtitle: 'Display morse pattern while learning',
-            value: settings.showHints,
-            onChanged: settings.setShowHints,
-          ),
-          _buildSwitchTile(
-            context: context,
-            title: 'Auto Advance',
-            subtitle: 'Move to next character after correct answer',
-            value: settings.autoAdvance,
-            onChanged: settings.setAutoAdvance,
-          ),
-
-          const SizedBox(height: 24),
-
-          // Statistics
-          _buildSectionHeader(context, 'STATISTICS'),
-          _buildStatTile(context, 'Current Level', '${progress.progress.currentLevel}'),
-          _buildStatTile(context, 'Characters Mastered', '${progress.getMasteredCharacters().length}'),
-          _buildStatTile(context, 'Total Practice Time', _formatTime(progress.progress.totalPracticeTime)),
-          _buildStatTile(context, 'Sessions Completed', '${progress.progress.totalSessionsCompleted}'),
-          _buildStatTile(context, 'Current Streak', '${progress.progress.currentStreak} days'),
-          _buildStatTile(context, 'Best Streak', '${progress.progress.bestStreak} days'),
 
           const SizedBox(height: 24),
 
@@ -264,39 +229,6 @@ class SettingsScreen extends StatelessWidget {
         activeTrackColor: AppColors.signalGreen,
       ),
     );
-  }
-
-  Widget _buildStatTile(BuildContext context, String label, String value) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppColors.cardBackground,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: Theme.of(context).textTheme.bodyMedium),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: AppColors.brass,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatTime(int seconds) {
-    final hours = seconds ~/ 3600;
-    final minutes = (seconds % 3600) ~/ 60;
-    if (hours > 0) {
-      return '${hours}h ${minutes}m';
-    }
-    return '${minutes}m';
   }
 
   void _confirmAction(

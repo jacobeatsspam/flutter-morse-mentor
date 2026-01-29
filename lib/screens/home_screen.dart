@@ -11,6 +11,7 @@ import 'challenge_screen.dart';
 import 'reference_screen.dart';
 import 'settings_screen.dart';
 import 'compose_screen.dart';
+import 'stats_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -172,26 +173,36 @@ class _HomeScreenState extends State<HomeScreen> {
 
           const SizedBox(height: 32),
 
-          // Stats row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildStatItem(
-                label: 'STREAK',
-                value: '${stats['currentStreak']}',
-                icon: Icons.local_fire_department_outlined,
+          // Stats row (tappable to see full stats)
+          GestureDetector(
+            onTap: () => _navigateTo(const StatsScreen()),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+              decoration: BoxDecoration(
+                color: AppColors.darkWood.withAlpha(128),
+                borderRadius: BorderRadius.circular(12),
               ),
-              _buildStatItem(
-                label: 'MASTERED',
-                value: '${stats['charactersMastered']}/${stats['totalCharacters']}',
-                icon: Icons.check_circle_outline,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildStatItem(
+                    label: 'STREAK',
+                    value: '${stats['currentStreak']}',
+                    icon: Icons.local_fire_department_outlined,
+                  ),
+                  _buildStatItem(
+                    label: 'MASTERED',
+                    value: '${stats['charactersMastered']}/${stats['totalCharacters']}',
+                    icon: Icons.check_circle_outline,
+                  ),
+                  _buildStatItem(
+                    label: 'WPM',
+                    value: '${stats['wordsPerMinute']}',
+                    icon: Icons.speed_outlined,
+                  ),
+                ],
               ),
-              _buildStatItem(
-                label: 'WPM',
-                value: '${stats['wordsPerMinute']}',
-                icon: Icons.speed_outlined,
-              ),
-            ],
+            ),
           ).animate().fadeIn(delay: 300.ms),
         ],
       ),

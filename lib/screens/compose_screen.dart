@@ -604,7 +604,6 @@ class _ComposeScreenState extends State<ComposeScreen> {
       final shareService = ShareService(
         toneFrequency: settings.toneFrequency,
         wordsPerMinute: settings.wordsPerMinute,
-        // For Farnsworth, set character speed faster than effective speed
         characterWpm: useFarnsworth ? settings.farnsworthWpm : null,
       );
 
