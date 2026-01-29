@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
@@ -12,7 +14,7 @@ import '../services/morse_audio_generator.dart';
 import '../services/morse_service.dart';
 import '../services/settings_service.dart';
 import '../services/share_service.dart';
-import '../widgets/telegraph_key.dart';
+import '../widgets/telegraph_key_layout.dart';
 
 // Conditional import for file decoding (mobile only)
 import '../sharing/decode_stub.dart'
@@ -52,9 +54,15 @@ class _ComposeScreenState extends State<ComposeScreen> {
   bool _isDecoding = false;
   bool _isPlaying = false;
   Timer? _decodeTimer;
+  Timer? _deleteRepeatTimer;
   
   // Audio playback
   final AudioPlayer _audioPlayer = AudioPlayer();
+  
+  // Audio feedback for telegraph key
+  bool _audioEnabled = true;
+  final AudioPlayer _tonePlayer = AudioPlayer();
+  Uint8List? _toneBytes;
 
   @override
   void initState() {
@@ -63,6 +71,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
     _textController.addListener(_onTextChanged);
     _textFieldFocusNode = FocusNode();
     _textFieldFocusNode.addListener(_onFocusChanged);
+    _initAudio();
     if (widget.incomingAudioFilePath != null) {
       _decodeIncomingAudio();
     }
@@ -71,12 +80,104 @@ class _ComposeScreenState extends State<ComposeScreen> {
   @override
   void dispose() {
     _decodeTimer?.cancel();
+    _deleteRepeatTimer?.cancel();
     _textController.removeListener(_onTextChanged);
     _textController.dispose();
     _textFieldFocusNode.removeListener(_onFocusChanged);
     _textFieldFocusNode.dispose();
     _audioPlayer.dispose();
+    _tonePlayer.dispose();
     super.dispose();
+  }
+
+  /// Initialize audio - generate a tone for playback feedback
+  void _initAudio() {
+    // Generate 2 seconds of tone at 700Hz (enough for any key press)
+    const sampleRate = 44100;
+    const frequency = 700.0;
+    const durationMs = 2000;
+    const numSamples = sampleRate * durationMs ~/ 1000;
+    
+    // Generate WAV file in memory
+    final samples = <int>[];
+    for (int i = 0; i < numSamples; i++) {
+      final t = i / sampleRate;
+      // Sine wave with fade in/out
+      var amplitude = sin(2 * pi * frequency * t);
+      // Apply envelope for first/last 10ms to avoid clicks
+      const fadeSamples = sampleRate * 10 ~/ 1000;
+      if (i < fadeSamples) {
+        amplitude *= i / fadeSamples;
+      } else if (i > numSamples - fadeSamples) {
+        amplitude *= (numSamples - i) / fadeSamples;
+      }
+      samples.add((amplitude * 32767 * 0.7).round().clamp(-32768, 32767));
+    }
+    
+    _toneBytes = _createWavBytes(samples, sampleRate);
+  }
+
+  /// Create WAV file bytes from PCM samples
+  Uint8List _createWavBytes(List<int> samples, int sampleRate) {
+    final byteData = ByteData(44 + samples.length * 2);
+    
+    // RIFF header
+    byteData.setUint8(0, 0x52); // 'R'
+    byteData.setUint8(1, 0x49); // 'I'
+    byteData.setUint8(2, 0x46); // 'F'
+    byteData.setUint8(3, 0x46); // 'F'
+    byteData.setUint32(4, 36 + samples.length * 2, Endian.little); // File size - 8
+    byteData.setUint8(8, 0x57);  // 'W'
+    byteData.setUint8(9, 0x41);  // 'A'
+    byteData.setUint8(10, 0x56); // 'V'
+    byteData.setUint8(11, 0x45); // 'E'
+    
+    // fmt chunk
+    byteData.setUint8(12, 0x66); // 'f'
+    byteData.setUint8(13, 0x6D); // 'm'
+    byteData.setUint8(14, 0x74); // 't'
+    byteData.setUint8(15, 0x20); // ' '
+    byteData.setUint32(16, 16, Endian.little); // Chunk size
+    byteData.setUint16(20, 1, Endian.little);  // Audio format (PCM)
+    byteData.setUint16(22, 1, Endian.little);  // Num channels (mono)
+    byteData.setUint32(24, sampleRate, Endian.little); // Sample rate
+    byteData.setUint32(28, sampleRate * 2, Endian.little); // Byte rate
+    byteData.setUint16(32, 2, Endian.little);  // Block align
+    byteData.setUint16(34, 16, Endian.little); // Bits per sample
+    
+    // data chunk
+    byteData.setUint8(36, 0x64); // 'd'
+    byteData.setUint8(37, 0x61); // 'a'
+    byteData.setUint8(38, 0x74); // 't'
+    byteData.setUint8(39, 0x61); // 'a'
+    byteData.setUint32(40, samples.length * 2, Endian.little); // Data size
+    
+    // Audio data
+    for (int i = 0; i < samples.length; i++) {
+      byteData.setInt16(44 + i * 2, samples[i], Endian.little);
+    }
+    
+    return byteData.buffer.asUint8List();
+  }
+
+  /// Start playing tone (called on key down)
+  Future<void> _startTone() async {
+    if (!_audioEnabled || _toneBytes == null) return;
+    try {
+      await _tonePlayer.play(BytesSource(_toneBytes!));
+    } catch (e) {
+      // Ignore audio player errors during rapid tapping
+      // The player can get into an invalid state when play/stop are called quickly
+    }
+  }
+
+  /// Stop playing tone (called on key up)
+  Future<void> _stopTone() async {
+    try {
+      await _tonePlayer.stop();
+    } catch (e) {
+      // Ignore audio player errors during rapid tapping
+    }
   }
 
   /// When focus is lost, disable keyboard mode
@@ -175,6 +276,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
 
   void _onKeyDown() {
     _keyDownTime = DateTime.now();
+    _startTone();
 
     // Record gap since last key up
     if (_lastKeyUpTime != null && _pressDurations.isNotEmpty) {
@@ -184,6 +286,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
   }
 
   void _onKeyUp() {
+    _stopTone();
     if (_keyDownTime == null) return;
 
     final duration = DateTime.now().difference(_keyDownTime!).inMilliseconds;
@@ -297,6 +400,30 @@ class _ComposeScreenState extends State<ComposeScreen> {
     _syncTextController();
   }
 
+  /// Start repeating delete when button is held
+  void _startDeleteRepeat() {
+    // Delete once immediately
+    _deleteLastLetter();
+    
+    // After initial delay, start repeating
+    _deleteRepeatTimer = Timer(const Duration(milliseconds: 400), () {
+      // Start periodic deletion
+      _deleteRepeatTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+        if (_decodedText.isNotEmpty || _currentPattern.isNotEmpty) {
+          _deleteLastLetter();
+        } else {
+          _stopDeleteRepeat();
+        }
+      });
+    });
+  }
+
+  /// Stop repeating delete
+  void _stopDeleteRepeat() {
+    _deleteRepeatTimer?.cancel();
+    _deleteRepeatTimer = null;
+  }
+
   void _clear() {
     _decodeTimer?.cancel();
     setState(() {
@@ -346,13 +473,13 @@ class _ComposeScreenState extends State<ComposeScreen> {
     final buffer = StringBuffer();
     for (final symbol in _inputSymbols) {
       if (symbol == '/') {
-        buffer.write('  /  ');
+        buffer.write('  ${MorseCode.displayWordSeparator}  ');
       } else if (symbol == ' ') {
         buffer.write('   ');
       } else if (symbol == '.') {
-        buffer.write('·');
+        buffer.write(MorseCode.displayDot);
       } else if (symbol == '-') {
-        buffer.write('–');
+        buffer.write(MorseCode.displayDash);
       } else {
         buffer.write(symbol);
       }
@@ -360,9 +487,9 @@ class _ComposeScreenState extends State<ComposeScreen> {
     // Add current pattern being typed
     for (final char in _currentPattern.split('')) {
       if (char == '.') {
-        buffer.write('·');
+        buffer.write(MorseCode.displayDot);
       } else if (char == '-') {
-        buffer.write('–');
+        buffer.write(MorseCode.displayDash);
       }
     }
     return buffer.toString();
@@ -748,6 +875,14 @@ class _ComposeScreenState extends State<ComposeScreen> {
                       constraints: const BoxConstraints(),
                     ),
                     const SizedBox(width: 8),
+                    IconButton(
+                      onPressed: _deleteLastLetter,
+                      icon: const Icon(Icons.backspace_outlined),
+                      tooltip: 'Delete',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'MORSE CODE KEYBOARD',
@@ -975,6 +1110,41 @@ class _ComposeScreenState extends State<ComposeScreen> {
     return button;
   }
 
+  /// Build the delete button with hold-to-repeat functionality
+  /// Double-tap to clear all
+  Widget _buildDeleteButton() {
+    final isEnabled = _decodedText.isNotEmpty || _currentPattern.isNotEmpty;
+    
+    return GestureDetector(
+      onTapDown: isEnabled ? (_) => _deleteLastLetter() : null,
+      onDoubleTap: isEnabled ? _clear : null,
+      onLongPressStart: isEnabled ? (_) => _startDeleteRepeat() : null,
+      onLongPressEnd: isEnabled ? (_) => _stopDeleteRepeat() : null,
+      onLongPressCancel: _stopDeleteRepeat,
+      child: SizedBox(
+        width: 56,
+        height: 56,
+        child: OutlinedButton(
+          onPressed: isEnabled ? () {} : null, // Empty callback to enable visual feedback
+          style: OutlinedButton.styleFrom(
+            padding: EdgeInsets.zero,
+          ),
+          child: const Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.backspace_outlined, size: 20),
+              SizedBox(height: 2),
+              Text(
+                'DEL',
+                style: TextStyle(fontSize: 8),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   /// Insert a character from the reference keyboard into the text field
   void _insertCharacter(String char) {
     // Handle space character specially
@@ -1126,7 +1296,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
                         child: Text(
                           (_inputSymbols.isNotEmpty || _currentPattern.isNotEmpty)
                               ? _formatMorseDisplay()
-                              : '· · · – – – · · ·',
+                              : MorseCode.formatForDisplay('...---...'), // SOS placeholder
                           style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                                 color: (_inputSymbols.isNotEmpty || _currentPattern.isNotEmpty)
                                     ? AppColors.warningAmber
@@ -1168,83 +1338,53 @@ class _ComposeScreenState extends State<ComposeScreen> {
 
           // Compact telegraph key with side button columns (hidden when keyboard visible)
           if (widget.incomingAudioFilePath == null && !keyboardVisible)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16, left: 8, right: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // Left column: Play, ShareText, ShareAudio
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _buildSquareButton(
-                          icon: _isPlaying ? Icons.stop : Icons.play_arrow,
-                          label: _isPlaying ? 'STOP' : 'PLAY',
-                          onPressed: (_inputSymbols.isNotEmpty || _decodedText.isNotEmpty)
-                              ? _playAudio
-                              : null,
-                          onLongPress: (_inputSymbols.isNotEmpty || _decodedText.isNotEmpty) && !_isPlaying
-                              ? () => _showPlaySpeedMenu(context)
-                              : null,
-                        ),
-                        const SizedBox(height: 12),
-                        _buildDualIconButton(
-                          icon1: Icons.share,
-                          icon2: Icons.text_fields,
-                          label: 'TEXT',
-                          onPressed: _inputSymbols.isNotEmpty ? _shareText : null,
-                        ),
-                        const SizedBox(height: 12),
-                        _buildDualIconButton(
-                          icon1: Icons.share,
-                          icon2: _isSharing ? Icons.hourglass_empty : Icons.volume_up,
-                          label: 'AUDIO',
-                          onPressed: (_inputSymbols.isNotEmpty && !_isSharing) ? _shareAudio : null,
-                          onLongPress: (_inputSymbols.isNotEmpty && !_isSharing) ? _showShareAudioMenu : null,
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Telegraph key in center
-                  TelegraphKey(
-                    onKeyDown: _onKeyDown,
-                    onKeyUp: _onKeyUp,
-                    enabled: !_isSharing,
-                    scale: 0.8,
-                  ),
-                  // Right column: Clear, Del, Space
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _buildSquareButton(
-                          icon: Icons.clear,
-                          label: 'CLEAR',
-                          onPressed: _clear,
-                        ),
-                        const SizedBox(height: 12),
-                        _buildSquareButton(
-                          icon: Icons.backspace_outlined,
-                          label: 'DEL',
-                          onPressed: (_decodedText.isNotEmpty || _currentPattern.isNotEmpty)
-                              ? _deleteLastLetter
-                              : null,
-                        ),
-                        const SizedBox(height: 12),
-                        _buildSquareButton(
-                          icon: Icons.space_bar,
-                          label: 'SPACE',
-                          onPressed: _addWordSpace,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+            TelegraphKeyLayout(
+              onKeyDown: _onKeyDown,
+              onKeyUp: _onKeyUp,
+              enabled: !_isSharing,
+              leftColumnButtons: [
+                _buildSquareButton(
+                  icon: _isPlaying ? Icons.stop : Icons.play_arrow,
+                  label: _isPlaying ? 'STOP' : 'PLAY',
+                  onPressed: (_inputSymbols.isNotEmpty || _decodedText.isNotEmpty)
+                      ? _playAudio
+                      : null,
+                  onLongPress: (_inputSymbols.isNotEmpty || _decodedText.isNotEmpty) && !_isPlaying
+                      ? () => _showPlaySpeedMenu(context)
+                      : null,
+                ),
+                _buildDualIconButton(
+                  icon1: Icons.share,
+                  icon2: Icons.text_fields,
+                  label: 'TEXT',
+                  onPressed: _inputSymbols.isNotEmpty ? _shareText : null,
+                ),
+                _buildDualIconButton(
+                  icon1: Icons.share,
+                  icon2: _isSharing ? Icons.hourglass_empty : Icons.volume_up,
+                  label: 'AUDIO',
+                  onPressed: (_inputSymbols.isNotEmpty && !_isSharing) ? _shareAudio : null,
+                  onLongPress: (_inputSymbols.isNotEmpty && !_isSharing) ? _showShareAudioMenu : null,
+                ),
+              ],
+              rightColumnButtons: [
+                _buildSquareButton(
+                  icon: _audioEnabled ? Icons.volume_up : Icons.volume_off,
+                  label: _audioEnabled ? 'SOUND' : 'MUTED',
+                  onPressed: () {
+                    setState(() {
+                      _audioEnabled = !_audioEnabled;
+                    });
+                  },
+                  highlighted: _audioEnabled,
+                ),
+                _buildDeleteButton(),
+                _buildSquareButton(
+                  icon: Icons.space_bar,
+                  label: 'SPACE',
+                  onPressed: _addWordSpace,
+                ),
+              ],
             )
           else
             const SizedBox(height: 40),

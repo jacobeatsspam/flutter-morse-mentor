@@ -5,13 +5,15 @@ import '../core/constants/morse_code.dart';
 
 /// Service for tracking and persisting user progress
 class ProgressService extends ChangeNotifier {
-  static const String _progressBoxName = 'user_progress';
-  static const String _characterProgressBoxName = 'character_progress';
-  static const String _sessionsBoxName = 'practice_sessions';
+  static const String _progressBoxName = 'user_progress_json';
+  static const String _characterProgressBoxName = 'character_progress_json';
+  static const String _sessionsBoxName = 'practice_sessions_json';
 
-  Box<UserProgress>? _progressBox;
-  Box<CharacterProgress>? _characterBox;
-  Box<PracticeSession>? _sessionsBox;
+  // Using dynamic boxes to store JSON maps instead of typed objects
+  // This avoids the need for Hive TypeAdapters
+  Box<dynamic>? _progressBox;
+  Box<dynamic>? _characterBox;
+  Box<dynamic>? _sessionsBox;
 
   UserProgress? _userProgress;
   final Map<String, CharacterProgress> _characterProgress = {};
@@ -26,19 +28,26 @@ class ProgressService extends ChangeNotifier {
   Future<void> initialize() async {
     if (_isInitialized) return;
 
-    // Register Hive adapters (would normally be generated)
-    // For now, we'll use JSON serialization as a workaround
+    // Open boxes for JSON storage (no TypeAdapters needed)
+    _progressBox = await Hive.openBox<dynamic>(_progressBoxName);
+    _characterBox = await Hive.openBox<dynamic>(_characterProgressBoxName);
+    _sessionsBox = await Hive.openBox<dynamic>(_sessionsBoxName);
 
-    _progressBox = await Hive.openBox<UserProgress>(_progressBoxName);
-    _characterBox = await Hive.openBox<CharacterProgress>(_characterProgressBoxName);
-    _sessionsBox = await Hive.openBox<PracticeSession>(_sessionsBoxName);
+    // Load existing progress from JSON
+    final progressJson = _progressBox?.get('current');
+    if (progressJson != null && progressJson is Map) {
+      _userProgress = UserProgress.fromJson(Map<String, dynamic>.from(progressJson));
+    } else {
+      _userProgress = UserProgress();
+    }
 
-    // Load existing progress
-    _userProgress = _progressBox?.get('current') ?? UserProgress();
-
-    // Load character progress
-    _characterBox?.values.forEach((cp) {
-      _characterProgress[cp.character] = cp;
+    // Load character progress from JSON
+    _characterBox?.keys.forEach((key) {
+      final cpJson = _characterBox?.get(key);
+      if (cpJson != null && cpJson is Map) {
+        final cp = CharacterProgress.fromJson(Map<String, dynamic>.from(cpJson));
+        _characterProgress[cp.character] = cp;
+      }
     });
 
     _isInitialized = true;
@@ -85,7 +94,8 @@ class ProgressService extends ChangeNotifier {
     _userProgress?.totalPracticeTime += session.durationSeconds;
     _userProgress?.updateDailyStreak();
 
-    await _sessionsBox?.add(session);
+    // Save session as JSON
+    await _sessionsBox?.add(session.toJson());
     await _saveProgress();
     notifyListeners();
   }
@@ -198,10 +208,11 @@ class ProgressService extends ChangeNotifier {
   }
 
   Future<void> _saveProgress() async {
-    await _progressBox?.put('current', _userProgress!);
+    // Save as JSON maps instead of typed objects
+    await _progressBox?.put('current', _userProgress!.toJson());
     
     for (final entry in _characterProgress.entries) {
-      await _characterBox?.put(entry.key, entry.value);
+      await _characterBox?.put(entry.key, entry.value.toJson());
     }
   }
 

@@ -71,17 +71,19 @@ class MorseDisplay extends StatelessWidget {
 class _Dot extends StatelessWidget {
   final double size;
   final bool isActive;
+  final Color? color;
 
-  const _Dot({required this.size, this.isActive = false});
+  const _Dot({required this.size, this.isActive = false, this.color});
 
   @override
   Widget build(BuildContext context) {
+    final baseColor = color ?? AppColors.brass;
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: isActive ? AppColors.signalGreen : AppColors.brass,
+        color: isActive ? AppColors.signalGreen : baseColor,
         boxShadow: isActive
             ? [
                 BoxShadow(
@@ -99,17 +101,19 @@ class _Dot extends StatelessWidget {
 class _Dash extends StatelessWidget {
   final double size;
   final bool isActive;
+  final Color? color;
 
-  const _Dash({required this.size, this.isActive = false});
+  const _Dash({required this.size, this.isActive = false, this.color});
 
   @override
   Widget build(BuildContext context) {
+    final baseColor = color ?? AppColors.brass;
     return Container(
       width: size * 3,
       height: size,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(size / 2),
-        color: isActive ? AppColors.signalGreen : AppColors.brass,
+        color: isActive ? AppColors.signalGreen : baseColor,
         boxShadow: isActive
             ? [
                 BoxShadow(
@@ -135,11 +139,15 @@ class MorseInputStream extends StatelessWidget {
   /// Size of each element
   final double elementSize;
 
+  /// Optional color override for the symbols
+  final Color? color;
+
   const MorseInputStream({
     super.key,
     required this.symbols,
     this.maxSymbols = 20,
     this.elementSize = 20,
+    this.color,
   });
 
   @override
@@ -167,9 +175,9 @@ class MorseInputStream extends StatelessWidget {
               children: [
                 for (int i = 0; i < displaySymbols.length; i++) ...[
                   if (displaySymbols[i] == '.')
-                    _Dot(size: elementSize)
+                    _Dot(size: elementSize, color: color)
                   else if (displaySymbols[i] == '-')
-                    _Dash(size: elementSize)
+                    _Dash(size: elementSize, color: color)
                   else if (displaySymbols[i] == ' ')
                     SizedBox(width: elementSize)
                   else if (displaySymbols[i] == '/')
@@ -178,7 +186,7 @@ class MorseInputStream extends StatelessWidget {
                       child: Text(
                         '/',
                         style: TextStyle(
-                          color: AppColors.textMuted,
+                          color: color ?? AppColors.textMuted,
                           fontSize: elementSize,
                         ),
                       ),

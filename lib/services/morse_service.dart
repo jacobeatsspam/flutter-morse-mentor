@@ -136,8 +136,8 @@ class MorseService {
     final pattern = charToPattern(character);
     if (pattern == null) return '';
 
-    // Convert to visual representation
-    return pattern.split('').map((s) => s == '.' ? '●' : '━━').join(' ');
+    // Convert to visual representation using standard display characters
+    return MorseCode.formatForDisplay(pattern);
   }
 
   /// Get mnemonic for a character

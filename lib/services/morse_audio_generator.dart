@@ -164,29 +164,40 @@ class MorseAudioGenerator {
   /// Generate sine wave tone samples
   List<int> _generateTone(int durationMs) {
     final numSamples = (sampleRate * durationMs / 1000).round();
-    final List<int> samples = [];
+    if (numSamples <= 0) return [];
     
-    // Fade in/out duration (5ms)
-    final fadeSamples = (sampleRate * 0.005).round();
+    final List<int> samples = List<int>.filled(numSamples, 0);
+    
+    // Fade in/out duration (10ms for smoother transitions)
+    // Cap fade to 1/4 of total duration to avoid overlapping fades
+    final maxFadeSamples = numSamples ~/ 4;
+    final fadeSamples = min((sampleRate * 0.010).round(), maxFadeSamples);
+    
+    // Pre-calculate constants for efficiency
+    final angularFrequency = 2.0 * pi * toneFrequency;
+    final sampleRateDouble = sampleRate.toDouble();
+    final fadeInEnd = fadeSamples;
+    final fadeOutStart = numSamples - fadeSamples;
     
     for (int i = 0; i < numSamples; i++) {
-      // Calculate sine wave
-      final t = i / sampleRate;
-      double sample = sin(2 * pi * toneFrequency * t);
+      // Calculate sine wave using pre-computed angular frequency
+      final t = i / sampleRateDouble;
+      final sample = sin(angularFrequency * t);
       
-      // Apply envelope to avoid clicks
-      double envelope = 1.0;
-      if (i < fadeSamples) {
-        // Fade in
-        envelope = i / fadeSamples;
-      } else if (i > numSamples - fadeSamples) {
-        // Fade out
-        envelope = (numSamples - i) / fadeSamples;
+      // Apply smooth envelope to avoid clicks
+      double envelope;
+      if (i < fadeInEnd) {
+        // Smooth fade in using cosine curve (sounds more natural)
+        envelope = 0.5 * (1.0 - cos(pi * i / fadeSamples));
+      } else if (i >= fadeOutStart) {
+        // Smooth fade out using cosine curve
+        envelope = 0.5 * (1.0 + cos(pi * (i - fadeOutStart) / fadeSamples));
+      } else {
+        envelope = 1.0;
       }
       
-      // Convert to 16-bit integer
-      final int16Sample = (sample * envelope * 32767 * 0.8).round().clamp(-32768, 32767);
-      samples.add(int16Sample);
+      // Convert to 16-bit integer with 80% amplitude to prevent clipping
+      samples[i] = (sample * envelope * 32767 * 0.8).round().clamp(-32768, 32767);
     }
     
     return samples;

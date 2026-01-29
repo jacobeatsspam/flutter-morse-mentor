@@ -1,16 +1,18 @@
 import 'dart:async';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/theme/app_theme.dart';
 import '../core/constants/morse_code.dart';
+import '../services/morse_audio_generator.dart';
 import '../services/morse_service.dart';
 import '../services/progress_service.dart';
 import '../services/settings_service.dart';
 import '../widgets/telegraph_key.dart';
 import '../widgets/morse_display.dart';
 
-enum PracticeMode { send, receive, freeform }
+enum PracticeMode { send, receive }
 
 class PracticeScreen extends StatefulWidget {
   const PracticeScreen({super.key});
@@ -26,7 +28,7 @@ class _PracticeScreenState extends State<PracticeScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
   }
 
   @override
@@ -45,7 +47,6 @@ class _PracticeScreenState extends State<PracticeScreen>
           tabs: const [
             Tab(text: 'SEND'),
             Tab(text: 'RECEIVE'),
-            Tab(text: 'FREEFORM'),
           ],
           indicatorColor: AppColors.brass,
           labelColor: AppColors.brass,
@@ -57,7 +58,6 @@ class _PracticeScreenState extends State<PracticeScreen>
         children: const [
           _SendPractice(),
           _ReceivePractice(),
-          _FreeformPractice(),
         ],
       ),
     );
@@ -274,11 +274,18 @@ class _ReceivePracticeState extends State<_ReceivePractice> {
   bool _isPlaying = false;
   int _correctCount = 0;
   int _totalCount = 0;
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   @override
   void initState() {
     super.initState();
     _generateNewTarget();
+  }
+
+  @override
+  void dispose() {
+    _audioPlayer.dispose();
+    super.dispose();
   }
 
   void _generateNewTarget() {
@@ -301,19 +308,27 @@ class _ReceivePracticeState extends State<_ReceivePractice> {
 
     setState(() => _isPlaying = true);
 
-    // Visual playback (in real app, would also play audio)
-    for (int i = 0; i < pattern.length; i++) {
-      await Future.delayed(
-        Duration(milliseconds: pattern[i] == '.'
-            ? MorseCode.getDotDuration(settings.wordsPerMinute)
-            : MorseCode.getDashDuration(settings.wordsPerMinute)),
+    try {
+      // Stop any previous playback and reset player state
+      await _audioPlayer.stop();
+      
+      // Generate audio for the morse pattern
+      final generator = MorseAudioGenerator(
+        toneFrequency: settings.toneFrequency,
+        wordsPerMinute: settings.wordsPerMinute,
       );
-      await Future.delayed(
-        Duration(milliseconds: MorseCode.getSymbolGap(settings.wordsPerMinute)),
-      );
-    }
+      final wavBytes = generator.generateWavFromMorseSync(pattern);
 
-    setState(() => _isPlaying = false);
+      // Play the generated audio
+      await _audioPlayer.play(BytesSource(wavBytes));
+
+      // Wait for playback to complete
+      await _audioPlayer.onPlayerComplete.first;
+    } finally {
+      if (mounted) {
+        setState(() => _isPlaying = false);
+      }
+    }
   }
 
   void _checkGuess(String guess) {
@@ -454,168 +469,6 @@ class _ReceivePracticeState extends State<_ReceivePractice> {
               );
             }).toList(),
           ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Freeform practice - user can tap freely and see decoded output
-class _FreeformPractice extends StatefulWidget {
-  const _FreeformPractice();
-
-  @override
-  State<_FreeformPractice> createState() => _FreeformPracticeState();
-}
-
-class _FreeformPracticeState extends State<_FreeformPractice> {
-  List<String> _inputSymbols = [];
-  String _decodedText = '';
-  String _currentPattern = '';
-  Timer? _decodeTimer;
-
-  @override
-  void dispose() {
-    _decodeTimer?.cancel();
-    super.dispose();
-  }
-
-  void _handleKeyPress(int duration) {
-    final settings = context.read<SettingsService>();
-    final dotThreshold = MorseCode.getDotDuration(settings.wordsPerMinute) * 2;
-    final symbol = duration < dotThreshold ? '.' : '-';
-
-    setState(() {
-      _inputSymbols.add(symbol);
-      _currentPattern += symbol;
-    });
-
-    // Reset decode timer
-    _decodeTimer?.cancel();
-    _decodeTimer = Timer(
-      Duration(milliseconds: MorseCode.getLetterGap(settings.wordsPerMinute)),
-      _decodeLetter,
-    );
-  }
-
-  void _decodeLetter() {
-    final morseService = context.read<MorseService>();
-    final char = morseService.patternToChar(_currentPattern);
-
-    setState(() {
-      if (char != null) {
-        _decodedText += char;
-        _inputSymbols.add(' ');
-      } else if (_currentPattern.isNotEmpty) {
-        _decodedText += '?';
-        _inputSymbols.add(' ');
-      }
-      _currentPattern = '';
-    });
-  }
-
-  void _addWordSpace() {
-    if (_currentPattern.isNotEmpty) {
-      _decodeLetter();
-    }
-
-    setState(() {
-      _decodedText += ' ';
-      _inputSymbols.add('/');
-    });
-  }
-
-  void _clear() {
-    setState(() {
-      _inputSymbols = [];
-      _decodedText = '';
-      _currentPattern = '';
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Decoded text display
-        Expanded(
-          child: Container(
-            width: double.infinity,
-            margin: const EdgeInsets.all(16),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.inputBackground,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.divider),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'DECODED TEXT',
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: SingleChildScrollView(
-                    child: Text(
-                      _decodedText.isEmpty ? 'Start tapping...' : _decodedText,
-                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                            color: _decodedText.isEmpty
-                                ? AppColors.textMuted
-                                : AppColors.textPrimary,
-                          ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-
-        // Morse input display
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: MorseInputStream(symbols: _inputSymbols),
-        ),
-
-        // Current pattern being entered
-        if (_currentPattern.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.all(8),
-            child: Text(
-              'Current: $_currentPattern',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.warningAmber,
-                  ),
-            ),
-          ),
-
-        // Control buttons
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              OutlinedButton.icon(
-                onPressed: _addWordSpace,
-                icon: const Icon(Icons.space_bar, size: 16),
-                label: const Text('WORD'),
-              ),
-              const SizedBox(width: 16),
-              OutlinedButton.icon(
-                onPressed: _clear,
-                icon: const Icon(Icons.clear, size: 16),
-                label: const Text('CLEAR'),
-              ),
-            ],
-          ),
-        ),
-
-        // Telegraph key
-        Padding(
-          padding: const EdgeInsets.only(bottom: 40),
-          child: TelegraphKey(onPress: _handleKeyPress),
         ),
       ],
     );

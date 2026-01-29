@@ -1,12 +1,20 @@
 /// Tracks learning progress for a single character
 class CharacterProgress {
   final String character;
-  int correctCount;
-  int incorrectCount;
+  int correctCount;  // All-time correct (for stats)
+  int incorrectCount;  // All-time incorrect (for stats)
   int streak;
   int bestStreak;
   DateTime? lastPracticed;
   bool mastered;
+  
+  /// Recent attempts for calculating accuracy (sliding window)
+  /// true = correct, false = incorrect
+  /// Only the last [windowSize] attempts are kept
+  List<bool> recentAttempts;
+  
+  /// Size of the sliding window for accuracy calculation
+  static const int windowSize = 15;
 
   CharacterProgress({
     required this.character,
@@ -16,19 +24,30 @@ class CharacterProgress {
     this.bestStreak = 0,
     this.lastPracticed,
     this.mastered = false,
-  });
+    List<bool>? recentAttempts,
+  }) : recentAttempts = recentAttempts ?? [];
 
   int get totalAttempts => correctCount + incorrectCount;
 
+  /// Accuracy based on recent attempts only (sliding window)
+  /// This allows users to recover from early mistakes
   double get accuracy {
-    if (totalAttempts == 0) return 0.0;
-    return correctCount / totalAttempts;
+    if (recentAttempts.isEmpty) return 0.0;
+    final correct = recentAttempts.where((a) => a).length;
+    return correct / recentAttempts.length;
   }
+  
+  /// Number of correct attempts in the recent window
+  int get recentCorrect => recentAttempts.where((a) => a).length;
 
-  /// A character is considered mastered after 10+ correct with 90%+ accuracy
-  bool get shouldBeMastered => correctCount >= 10 && accuracy >= 0.9;
+  /// A character is considered mastered after:
+  /// - At least [windowSize] attempts in the window
+  /// - 90%+ accuracy in recent attempts
+  bool get shouldBeMastered => 
+      recentAttempts.length >= windowSize && accuracy >= 0.9;
 
   void recordAttempt(bool correct) {
+    // Update all-time counts
     if (correct) {
       correctCount++;
       streak++;
@@ -37,6 +56,13 @@ class CharacterProgress {
       incorrectCount++;
       streak = 0;
     }
+    
+    // Update sliding window
+    recentAttempts.add(correct);
+    if (recentAttempts.length > windowSize) {
+      recentAttempts.removeAt(0);  // Remove oldest
+    }
+    
     lastPracticed = DateTime.now();
     mastered = shouldBeMastered;
   }
@@ -49,6 +75,7 @@ class CharacterProgress {
         'bestStreak': bestStreak,
         'lastPracticed': lastPracticed?.toIso8601String(),
         'mastered': mastered,
+        'recentAttempts': recentAttempts,
       };
 
   factory CharacterProgress.fromJson(Map<String, dynamic> json) {
@@ -62,6 +89,8 @@ class CharacterProgress {
           ? DateTime.parse(json['lastPracticed'] as String)
           : null,
       mastered: json['mastered'] as bool? ?? false,
+      recentAttempts: (json['recentAttempts'] as List<dynamic>?)
+          ?.cast<bool>() ?? [],
     );
   }
 }
@@ -178,5 +207,31 @@ class PracticeSession {
   double get accuracy {
     if (totalAttempts == 0) return 0.0;
     return correctAnswers / totalAttempts;
+  }
+
+  Map<String, dynamic> toJson() => {
+        'startTime': startTime.toIso8601String(),
+        'endTime': endTime?.toIso8601String(),
+        'sessionType': sessionType,
+        'correctAnswers': correctAnswers,
+        'totalAttempts': totalAttempts,
+        'wordsPerMinute': wordsPerMinute,
+        'charactersLearned': charactersLearned,
+      };
+
+  factory PracticeSession.fromJson(Map<String, dynamic> json) {
+    return PracticeSession(
+      startTime: DateTime.parse(json['startTime'] as String),
+      endTime: json['endTime'] != null
+          ? DateTime.parse(json['endTime'] as String)
+          : null,
+      sessionType: json['sessionType'] as String,
+      correctAnswers: json['correctAnswers'] as int? ?? 0,
+      totalAttempts: json['totalAttempts'] as int? ?? 0,
+      wordsPerMinute: json['wordsPerMinute'] as int? ?? 0,
+      charactersLearned: (json['charactersLearned'] as List<dynamic>?)
+              ?.cast<String>() ??
+          [],
+    );
   }
 }

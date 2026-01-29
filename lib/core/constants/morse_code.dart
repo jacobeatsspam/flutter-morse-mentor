@@ -9,6 +9,37 @@ class MorseCode {
   static const int letterGap = 180; // 3 units (between letters)
   static const int wordGap = 420; // 7 units (between words)
 
+  /// Display characters for visual representation of Morse code
+  /// Following common typographic conventions for Morse display
+  /// - Middle dot (·) U+00B7 for dit - compact and clear
+  /// - En dash (–) U+2013 for dah - single character, proper width
+  static const String displayDot = '·';
+  static const String displayDash = '–';
+  static const String displayWordSeparator = '/';
+
+  /// Format a morse pattern for display (e.g., ".-" becomes "· –")
+  /// Uses standard display characters with spacing
+  static String formatForDisplay(String pattern, {bool spaced = true}) {
+    final buffer = StringBuffer();
+    for (int i = 0; i < pattern.length; i++) {
+      final char = pattern[i];
+      if (char == '.') {
+        buffer.write(displayDot);
+      } else if (char == '-') {
+        buffer.write(displayDash);
+      } else if (char == ' ') {
+        buffer.write('   '); // Letter gap
+      } else if (char == '/') {
+        buffer.write(' $displayWordSeparator '); // Word gap
+      }
+      // Add space between symbols if requested
+      if (spaced && i < pattern.length - 1 && pattern[i + 1] != ' ' && pattern[i + 1] != '/') {
+        buffer.write(' ');
+      }
+    }
+    return buffer.toString();
+  }
+
   /// Letters A-Z
   static const Map<String, String> letters = {
     'A': '.-',
